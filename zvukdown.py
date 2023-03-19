@@ -5,24 +5,28 @@ import sys
 import time
 from pathlib import Path
 from shutil import copyfile
+from typing import Any
 
 import requests
 from mutagen.flac import FLAC, Picture
 
-
-class zvukdown:
+class zvukdown_:        
     def __init__(self):
         self.verify = True
         self.headers = []
-        #self.token = self.read_token()
+        # self.token = self.read_token()
         pass
 
     def read_token(self):
-        with open("token.txt", "r", encoding="utf8") as f:
-            token = f.read()
-            if len(token) != 32:
-                raise Exception("Wrong token length")
-            self.headers = {"x-auth-token": token}
+        import os.path
+        if os.path.exists('token.txt'):
+            with open("token.txt", "r", encoding="utf8") as f:
+                token = f.read()
+                if len(token) != 32:
+                    raise Exception("Wrong token length")
+                self.headers = {"x-auth-token": token}
+        else:
+            print('Нет файла token.txt')
 
     def save_token(self, login, password):
         url = "https://zvuk.com/api/tiny/login/email"
@@ -45,15 +49,17 @@ class zvukdown:
                         raise Exception("Wrong token length")
                     self.headers = {"x-auth-token": token}
 
-    def __ntfs(self, filename):
-        for ch in ['<', '>', ':', '"', '/', '\\', '|', '?', '*']:
+    @staticmethod
+    def __ntfs(filename):
+        for ch in ['<', '>', '@', '%', '!', '+', ':', '"', '/', '\\', '|', '?', '*']:
             if ch in filename:
-                filename = filename.replace(ch, " ")
+                filename = filename.replace(ch, "_")
         filename = " ".join(filename.split())
         filename = filename.replace(" .flac", ".flac")
         return filename
 
-    def __launch(self, args):
+    @staticmethod
+    def __launch(args):
         try:
             pipe = subprocess.Popen(args, creationflags=0x08000000, stdin=subprocess.PIPE,
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
@@ -67,10 +73,11 @@ class zvukdown:
                 raise Exception("Unable to launch")
             return output
         except FileNotFoundError:
-            return("Install pingo and imagemagick!")
-            
+            return "Install pingo and imagemagick!"
 
-    def __to_str(self, l):
+    @staticmethod
+    def __to_str(l):
+        global int
         if isinstance(l, int):
             return [l]
         elif not isinstance(l, str):
@@ -92,7 +99,7 @@ class zvukdown:
         info = {}
         for i in resp['result']['labels'].values():
             info[i["id"]] = i['title']
-        return(info)
+        return (info)
 
     def __get_tracks_metadata(self, track_ids):
         track_ids = self.__to_str(track_ids)
@@ -113,7 +120,7 @@ class zvukdown:
                 release_id = s['release_id']
                 track_id = s['id']
                 if s['genres']:
-                    #genre = s['genres'][0]
+                    # genre = s['genres'][0]
                     genre = ", ".join(s['genres'])
                 else:
                     genre = ""
@@ -132,6 +139,10 @@ class zvukdown:
 
     def __get_tracks_link(self, track_ids):
         links = {}
+        print(" ")
+        print("Поиск треков:")
+        print(" ")
+        index = 0
         for i in track_ids:
             url = "https://zvuk.com/api/tiny/track/stream"
             params = {
@@ -140,13 +151,17 @@ class zvukdown:
             }
             r = requests.get(url, params=params,
                              headers=self.headers, verify=self.verify)
-            r.raise_for_status()
+            # r.raise_for_status()
+            # print(r.raise_for_status())
             resp = r.json(strict=False)
             links[i] = resp['result']['stream']
-            time.sleep(1)
+            if links[i] != 0:
+                index += 1
+                print(index,": ",i, "- ", resp['result']['stream'])
+            time.sleep(3)
         return links
 
-    def __get_releases_info(self, release_ids):
+    def __get_releases_info(self, release_ids: object) -> object:
         release_ids = self.__to_str(release_ids)
 
         info = {}
@@ -166,31 +181,36 @@ class zvukdown:
 
         # print(resp)
         for a in resp['result']["releases"].values():
-            info[a["id"]] = {"track_ids": a["track_ids"], "tracktotal": len(a["track_ids"]), "copyright": labels_info[a['label_id']], "date": a["date"], "album": a["title"], "author": a["credits"]}
-
+            info[a["id"]] = {"track_ids": a["track_ids"], "tracktotal": len(a["track_ids"]),
+                             "copyright": labels_info[a['label_id']], "date": a["date"], "album": a["title"],
+                             "author": a["credits"]}
+        # print(info)
         return info
 
     def __download_image(self, release_id, image_link):
-        pic = Path(f"temp_{release_id}.jpg")
+        global err
+        pic: Path = Path(f"temp_{release_id}.jpg")
         comp_pic = Path(f"temp_{release_id}_comp.jpg")
         if not pic.is_file():
+            # os.system("pause")
             r = requests.get(image_link, allow_redirects=True,
                              verify=self.verify)
             open(pic, 'wb').write(r.content)
-            print(self.__launch(f'pingo -sa -notime -strip {pic}'))
-            if os.path.getsize(pic) > 2 * 1000 * 1000:
-                print(self.__launch(f"magick convert {pic} -define jpeg:extent=1MB {comp_pic}"))
-                print(self.__launch(f'pingo -sa -notime -strip {comp_pic}'))
-            else:
-                copyfile(pic, comp_pic)
-
-            # pingo optimize, compress
+            # print(self.__launch(f'pingo -sa -notime -strip {pic}'))
+            # if os.path.getsize(pic) > 2 * 1000 * 1000:
+            # print(self.__launch(f"magick convert {pic} -define jpeg:extent=1MB {comp_pic}"))
+            # print(self.__launch(f'pingo -sa -notime -strip {comp_pic}'))
+            # else:
+            # copyfile(pic, comp_pic)
+        copyfile(pic, comp_pic)
+        # pingo optimize, compress
         return {"original": pic, "compressed": comp_pic}
+        # return {"original": pic}
 
     def __save_track(self, url, metadata, releases, single):
         pic = self.__download_image(metadata["release_id"], metadata["image"])
         if not single and releases["tracktotal"] != 1:
-            folder = f'{releases["author"]} - {releases["album"]} ({str(releases["date"])[0:4]})'
+            folder = f'{releases["author"]} - {str(releases["date"])[0:4]} {releases["album"]}'
             folder = self.__ntfs(folder)
             if not os.path.exists(folder):
                 os.makedirs(folder)
@@ -207,7 +227,7 @@ class zvukdown:
             pic = pic["original"]
             folder = ""
             filename = f'{metadata["author"]} - {metadata["name"]}.flac'
-
+        
         filename = self.__ntfs(filename)
         filename = os.path.join(folder, filename)
 
@@ -255,25 +275,44 @@ class zvukdown:
                 release_ids.add(i["release_id"])
             releases = self.__get_releases_info(release_ids)
 
+        print(" ")
+        print("Скачивание треков")
+        print(" ")
+        index = 0
         for i in metadata.keys():
+            print(" ")
+            index += 1
+            print("Скачивание трека № ", index, ":")
             self.__save_track(link[i], metadata[i],
                               releases[metadata[i]["release_id"]], single)
 
     def download_albums(self, release_ids):
         track_ids = []
-        releases = self.__get_releases_info(release_ids)
+        releases: dict[Any, dict[str, int | Any]] = self.__get_releases_info(release_ids)
+        #print(releases)
+        print(" ")
+        print("Информация о релизе: \n")
+        from pprint import pprint
+        pprint(releases)
+        #for key, value in releases.items():
+        #    if key := track_ids:
+        #        print(" ")
+        #    else:
+        #        print("{0}: {1}".format(key, value) + "\n")
+        # os.system("pause")
         for i in releases.values():
             track_ids += i["track_ids"]
         self.download_tracks(track_ids, releases=releases)
 
 
 if __name__ == '__main__':
+    
     release_ids = []
     track_ids = []
-    z = zvukdown()
+    z = zvukdown_()
 
     if "login" in sys.argv:
-        #print(sys.argv[2], sys.argv[3])
+        # print(sys.argv[2], sys.argv[3])
         z.save_token(sys.argv[2], sys.argv[3])
         print("Token saved!")
     else:
