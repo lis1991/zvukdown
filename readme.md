@@ -1,33 +1,56 @@
-# Zvukdown
+```markdown
+# Zvuk Downloader
 
-## Скачивальщик песен и альбомов во FLAC со Сберзвука
+## Скачиватель музыкальных композиций и медиафайлов со Zvuk.com
 
-Для работы требуется аккаунт с подпиской или пробным перодом
+### Требования для работы:
+- Наличие активного аккаунта с подпиской Prime или пробным периодом на платформе Zvuk.com.
+- Валидный файл куков (`cookies.txt`) в формате Netscape, содержащий актуальный токен авторизации (`auth`).
 
-Токен для работы скрипта можно найти на https://zvuk.com/api/v2/tiny/profile
+### Как получить токен авторизации:
+1. Войдите в аккаунт на сайте Zvuk.com.
+2. Используйте расширение для браузера, чтобы экспортировать куки:
+   - **Chrome**: [Get Cookies.txt](https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc)
+   - **Firefox**: [Export Cookies to Text File](https://addons.mozilla.org/en-US/firefox/addon/export-cookies-txt/)
+3. Убедитесь, что файл содержит токен авторизации для домена `zvuk.com`.
 
-Файл token.txt должен иметь размер 32, т.е. в нём не должно быть символа newline в конце. 
-Под линуксом можно так: 
-```
-echo -n "<токен>" > token.txt
-```
-Находясь в папке со скриптом.
+### Примеры использования:
+'''
+python zvuk_downloader.py --threads=10 https://zvuk.com/artist/852542
+'''
+'''
+python zvuk_downloader.py https://zvuk.com/release/29015282
+'''
+'''
+python zvuk_downloader.py https://zvuk.com/playlist/8545187
+'''
+'''
+python zvuk_downloader.py https://zvuk.com/track/12776890
+'''
+'''
+python zvuk_downloader.py https://zvuk.com/selection/1
+'''
+'''
+python zvuk_downloader.py https://zvuk.com/podcast/14574115
+'''
+'''
+python zvuk_downloader.py https://zvuk.com/abook/24072774
+'''
+'''
+python zvuk_downloader.py --check-auth
+'''
+### Доступные параметры:
+- `--threads=N`: Устанавливает количество параллельных потоков скачивания (по умолчанию 5).
+- `--output-path=DIR`: Определяет директорию для сохранения файлов.
+- `--format=1|2|3`: Выбор качества аудио (1=MP3-128, 2=MP3-320, 3=FLAC; по умолчанию FLAC).
 
-## Использование:
+### Шаблон путей:
+Пути для сохранения поддерживают переменные-шаблоны:
+- `{ {.albumArtist} }`: Имя исполнителя.
+- `{ {.releaseYear} }`: Год издания.
+- `{ {.albumTitle} }`: Название альбома.
 
-Вам нужны ссылки в которых есть release (целый альбом) или track (один трек из альбома), playlist пока не поддерживается, если в альбоме один трек то разницы нет
-```
-python zvukdown.py https://sber-zvuk.com/release/20382579
-python zvukdown.py https://sber-zvuk.com/track/111570529
-```
-
-Можно скачивать сколько угодно песен одновременно, главное чтобы ссылки были через пробел:
-```
-python zvukdown.py https://sber-zvuk.com/track/109637843 https://sber-zvuk.com/track/109637862 https://sber-zvuk.com/release/20898916
-```
-
-Если вы скачиваете один трек или альбом из одного трека, то папка создана не будет, файл будет называться `Автор - Название.flac`. Папка создаётся по правилам торрент трекеров: `Автор - Альбом (год выпуска)`, а песни внутри: `Номер трека - Название.flac`.
-
-# Зависимости
-
-Все теги проставляются автоматически. При скачивании альбома обложка копируется в папку под названием `cover.jpg`.
+Примеры:
+- **Unix**: `"Artists/{ {.albumArtist} }/{ {.releaseYear} } - { {.albumTitle} }"`
+- **Windows**: `"Music\\{ {.albumArtist} }\\{ {.releaseYear} } - { {.albumTitle} }"`
+- **Flat**: `"{ {.releaseYear} } - { {.albumArtist} } - { {.albumTitle} }"`
