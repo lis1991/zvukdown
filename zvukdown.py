@@ -22,6 +22,36 @@ try:
 except ImportError:
     HAS_TQDM = False
 
+GRAPHQL_URL = "https://zvuk.com/api/v1/graphql"
+
+# Запросы GraphQL
+AUDIOBOOK_QUERY = """
+query getAudioBookData($id: Int!) {
+  book: audioBook(id: $id) {
+    id
+    title
+    authorName
+    chapters {
+      id
+      title
+      # Другие поля, если нужны, например, duration
+    }
+  }
+}
+"""
+
+CHAPTER_QUERY = """
+query getAudioBookChapter($id: Int!) {
+  chapter(id: $id) {
+    id
+    title
+    mid
+    # high (для высокого качества, если нужно)
+    # expire (срок действия ссылки)
+  }
+}
+"""
+
 HELP_MESSAGE = """
 Пример использования:
   python zvuk_downloader.py --threads=10 https://zvuk.com/artist/852542
@@ -204,56 +234,78 @@ class zvukdown_:
 
         self.run_threads(episode_ids, download_episode)
 
-    def download_audiobook(self, audiobook_id):
-        logging.info(f"Скачивание аудиокниги: {audiobook_id}")
-        # Исправлен URL (убраны потенциальные лишние пробелы)
-        url = f"https://zvuk.com/api/tiny/audiobooks?ids={audiobook_id}"
-        # Используем cached_get и передаем headers/cookies/verify
-        r = self.cached_get(url, headers=self.headers, cookies=self.cookies, verify=self.verify)
-        data = r.json()['result']['audiobooks'][str(audiobook_id)]
+def download_audiobook(self, audiobook_id):
+                chapter_payload = {
+                    "operationName": "getAudioBookChapter",
+                    "variables": {"id": int(chapter_id)},
+                    "query": CHAPTER_QUERY
+                }
+                chapter_response = requests.post(
+                    GRAPHQL_URL,
+                    headers=self.headers,
+                    json=chapter_payload,
+                    cookies=self.cookies,
+                    verify=self.verify
+                )
+                chapter_response.raise_for_status()
+                chapter_data = chapter_response.json()
 
-        chapters = data.get('chapters', [])
-        chapter_ids = [chapter['id'] for chapter in chapters]
+                 # Проверка на ошибки в ответе GraphQL
+                if 'errors' in chapter_data:
+                    logging.error(f"Ошибка GraphQL при получении данных главы {chapter_id}: {chapter_data['errors']}")
+                    return
 
-        def download_chapter(chapter_id):
-            # Исправлен URL
-            chapter_url = f"https://zvuk.com/api/tiny/audiobook_chapters?id={chapter_id}"
-            # Используем cached_get и передаем headers/cookies/verify
-            r = self.cached_get(chapter_url, headers=self.headers, cookies=self.cookies, verify=self.verify)
-            chapter_data = r.json()['result']['chapters'][str(chapter_id)]
+                chapter_info = chapter_data['data']['chapter']
+                if not chapter_info:
+                    logging.error(f"Глава с ID {chapter_id} не найдена.")
+                    return
 
-            title = self.__ntfs(chapter_data['title'])
-            # Предположим, автор тоже есть, или можно использовать данные из самой аудиокниги
-            author = self.__ntfs(data.get('author', 'Unknown Author'))
-            # Формируем имя файла
-            filename = f"{chapter_id:03d} - {title}.mp3" # Использем .mp3, так как stream_url в скрипте не используется, а mid скорее всего отдает mp3 для аудиокниг/подкастов
-            # Создаем папку для аудиокниг, используя название аудиокниги
-            book_title = self.__ntfs(data['title'])
-            filepath = os.path.join("_audiobooks", book_title, filename)
-            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+                # 5. Извлекаем ссылку на аудио (используем 'mid')
+                stream_url = chapter_info.get('mid')
+                if not stream_url:
+                    logging.error(f"Ссылка на аудио (mid) не найдена для главы {chapter_id}. Данные главы: {chapter_info}")
+                    return
 
-            # ИСПРАВЛЕНИЕ: Используем 'mid' вместо 'stream_url'
-            # Проверяем наличие ключа 'mid'
-            if 'mid' not in chapter_data:
-                 logging.error(f"Ключ 'mid' не найден в данных главы {chapter_id}. Данные главы: {chapter_data}")
-                 return # Пропускаем эту главу
+                # 6. Формируем имя файла
+                # Нумерация с ведущими нулями, например: 01 - Название главы.mp3
+                filename = f"{chapter_id:03d} - {safe_chapter_title}.mp3"
+                filepath = base_out_dir / filename
 
-            stream_url = chapter_data['mid'] # <-- ИСПРАВЛЕНО
-
-            # Скачиваем файл, используя headers/cookies/verify
-            # Лучше использовать потоковую загрузку для больших файлов
-            try:
-                with requests.get(stream_url, headers=self.headers, cookies=self.cookies, verify=self.verify, stream=True) as r_stream:
-                     r_stream.raise_for_status()
-                     with open(filepath, 'wb') as f:
-                         for chunk in r_stream.iter_content(chunk_size=8192):
-                             f.write(chunk)
+                # 7. Скачиваем аудиофайл
+                logging.info(f"Начинаем скачивание главы: {filename}")
+                # Используем потоковую загрузку
+                with requests.get(
+                    stream_url,
+                    headers=self.headers, # Может потребоваться только Referer или User-Agent, но передаем на всякий
+                    cookies=self.cookies,
+                    verify=self.verify,
+                    stream=True
+                ) as r_audio:
+                    r_audio.raise_for_status()
+                    with open(filepath, 'wb') as f:
+                        for chunk in r_audio.iter_content(chunk_size=8192):
+                            if chunk: # filter out keep-alive new chunks
+                                f.write(chunk)
+                
                 logging.info(f"Скачано: {filename}")
-            except requests.RequestException as e:
-                 logging.error(f"Ошибка при скачивании {filename}: {e}")
 
-        # Запускаем потоки для скачивания глав
-        self.run_threads(chapter_ids, download_chapter)
+            except requests.RequestException as e:
+                logging.error(f"Ошибка сети при скачивании главы {chapter.get('id', 'unknown')}: {e}")
+            except KeyError as e:
+                logging.error(f"Ошибка данных (KeyError) при обработке главы {chapter.get('id', 'unknown')}: {e}")
+            except Exception as e:
+                logging.error(f"Неожиданная ошибка при скачивании главы {chapter.get('id', 'unknown')}: {e}")
+
+        # 8. Запускаем скачивание глав в несколько потоков
+        # self.run_threads ожидает список аргументов. Передаем список словарей глав.
+        self.run_threads(chapters, download_single_chapter, show_progress=True)
+
+    except requests.RequestException as e:
+        logging.error(f"Ошибка сети при запросе данных аудиокниги {audiobook_id}: {e}")
+    except KeyError as e:
+        logging.error(f"Ошибка данных (KeyError) при парсинге аудиокниги {audiobook_id}: {e}, Ответ: {book_data if 'book_data' in locals() else 'N/A'}")
+    except Exception as e:
+        logging.error(f"Неожиданная ошибка в download_audiobook для {audiobook_id}: {e}")
 
 
     def download_track(self, track_id):
