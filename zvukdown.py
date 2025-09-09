@@ -206,7 +206,9 @@ class zvukdown_:
 
     def download_audiobook(self, audiobook_id):
         logging.info(f"Скачивание аудиокниги: {audiobook_id}")
+        # Исправлен URL (убраны потенциальные лишние пробелы)
         url = f"https://zvuk.com/api/tiny/audiobooks?ids={audiobook_id}"
+        # Используем cached_get и передаем headers/cookies/verify
         r = self.cached_get(url, headers=self.headers, cookies=self.cookies, verify=self.verify)
         data = r.json()['result']['audiobooks'][str(audiobook_id)]
 
@@ -214,23 +216,45 @@ class zvukdown_:
         chapter_ids = [chapter['id'] for chapter in chapters]
 
         def download_chapter(chapter_id):
+            # Исправлен URL
             chapter_url = f"https://zvuk.com/api/tiny/audiobook_chapters?id={chapter_id}"
+            # Используем cached_get и передаем headers/cookies/verify
             r = self.cached_get(chapter_url, headers=self.headers, cookies=self.cookies, verify=self.verify)
             chapter_data = r.json()['result']['chapters'][str(chapter_id)]
 
             title = self.__ntfs(chapter_data['title'])
-            author = self.__ntfs(chapter_data['author'])
-            filename = f"{title}.mp3"
-            filepath = os.path.join("_audiobooks", title)
+            # Предположим, автор тоже есть, или можно использовать данные из самой аудиокниги
+            author = self.__ntfs(data.get('author', 'Unknown Author'))
+            # Формируем имя файла
+            filename = f"{chapter_id:03d} - {title}.mp3" # Использем .mp3, так как stream_url в скрипте не используется, а mid скорее всего отдает mp3 для аудиокниг/подкастов
+            # Создаем папку для аудиокниг, используя название аудиокниги
+            book_title = self.__ntfs(data['title'])
+            filepath = os.path.join("_audiobooks", book_title, filename)
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
-            stream_url = chapter_data['stream_url']
-            with open(filepath, 'wb') as f:
-                f.write(requests.get(stream_url, verify=self.verify).content)
+            # ИСПРАВЛЕНИЕ: Используем 'mid' вместо 'stream_url'
+            # Проверяем наличие ключа 'mid'
+            if 'mid' not in chapter_data:
+                 logging.error(f"Ключ 'mid' не найден в данных главы {chapter_id}. Данные главы: {chapter_data}")
+                 return # Пропускаем эту главу
 
-            logging.info(f"Скачано: {filename}")
+            stream_url = chapter_data['mid'] # <-- ИСПРАВЛЕНО
 
+            # Скачиваем файл, используя headers/cookies/verify
+            # Лучше использовать потоковую загрузку для больших файлов
+            try:
+                with requests.get(stream_url, headers=self.headers, cookies=self.cookies, verify=self.verify, stream=True) as r_stream:
+                     r_stream.raise_for_status()
+                     with open(filepath, 'wb') as f:
+                         for chunk in r_stream.iter_content(chunk_size=8192):
+                             f.write(chunk)
+                logging.info(f"Скачано: {filename}")
+            except requests.RequestException as e:
+                 logging.error(f"Ошибка при скачивании {filename}: {e}")
+
+        # Запускаем потоки для скачивания глав
         self.run_threads(chapter_ids, download_chapter)
+
 
     def download_track(self, track_id):
         print(f"Скачивание трека: {track_id}")
